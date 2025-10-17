@@ -32,13 +32,20 @@ authenticator = stauth.Authenticate(
     cookie_expiry_days=COOKIE_EXPIRY,
 )
 
-auth_status, username = authenticator.login("Login", location="main")
-name = username  # keep same variable names for rest of code
+# Render login form in the main area (returns None; values are in st.session_state)
+authenticator.login(location="main")
 
-if auth_status is False:
+auth_status = st.session_state.get("authentication_status", None)
+username = st.session_state.get("username", None)
+name = st.session_state.get("name", username or "")
+
+if auth_status is True:
+    st.sidebar.write(f"Signed in as **{name}**")
+    authenticator.logout("Logout", location="sidebar")
+elif auth_status is False:
     st.error("Incorrect username or password.")
     st.stop()
-elif auth_status is None:
+else:
     st.info("Please enter your username and password.")
     st.stop()
 
