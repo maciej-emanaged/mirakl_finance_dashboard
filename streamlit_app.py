@@ -62,7 +62,7 @@ else:
 
 # If we’re here → authenticated
 st.sidebar.write(f"Signed in as **{name}**")
-authenticator.logout("Logout", "sidebar")
+authenticator.logout("Logout", location="sidebar", key="logout-btn")
 
 st.title("Mirakl Profitability — v1 (GMV, Refunds, Fees, Contribution)")
 
