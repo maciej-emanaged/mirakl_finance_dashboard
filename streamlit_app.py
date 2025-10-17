@@ -60,12 +60,10 @@ else:
     st.info("Please enter your username and password.")
     st.stop()
 
-# If we’re here → authenticated. Render sidebar user card only once.
-if not st.session_state.get("sidebar_rendered"):
-    with st.sidebar:
-        st.markdown(f"Signed in as **{name}**")
-        authenticator.logout("Logout", location="sidebar", key="logout-btn")
-    st.session_state["sidebar_rendered"] = True
+# If we’re here → authenticated. Always render sidebar.
+with st.sidebar:
+    st.markdown(f"Signed in as **{name}**")
+    authenticator.logout("Logout", location="sidebar", key="logout-btn")
 
 st.title("Mirakl Profitability — v1 (GMV, Refunds, Fees, Contribution)")
 
