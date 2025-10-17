@@ -90,20 +90,18 @@ def get_engine():
 @st.cache_data(ttl=300)
 def get_marketplaces():
     engine = get_engine()
-    with engine.connect() as conn:
-        return pd.read_sql(
-            "select code as marketplace_code, name from mirakl.marketplaces order by code",
-            conn,
-        )
+    return pd.read_sql(
+        "select code as marketplace_code, name from mirakl.marketplaces order by code",
+        con=engine,
+    )
 
 @st.cache_data(ttl=300)
 def get_date_bounds():
     engine = get_engine()
-    with engine.connect() as conn:
-        df = pd.read_sql(
-            "select min(created_at) as min_dt, max(created_at) as max_dt from mirakl.orders",
-            conn,
-        )
+    df = pd.read_sql(
+        "select min(created_at) as min_dt, max(created_at) as max_dt from mirakl.orders",
+        con=engine,
+    )
     return (df.loc[0, "min_dt"], df.loc[0, "max_dt"])
 
 @st.cache_data(ttl=300)
@@ -162,8 +160,7 @@ def kpis(start_dt, end_dt, mkt_codes=None, sku_filter=None):
         "sku": sku_filter if sku_filter else None,
     }
     engine = get_engine()
-    with engine.connect() as conn:
-        return pd.read_sql(sql, conn, params=params)
+    return pd.read_sql(sql, con=engine, params=params)
 
 @st.cache_data(ttl=300)
 def top_skus(start_dt, end_dt, mkt_codes=None, sku_filter=None):
@@ -219,8 +216,7 @@ def top_skus(start_dt, end_dt, mkt_codes=None, sku_filter=None):
         "sku": sku_filter if sku_filter else None,
     }
     engine = get_engine()
-    with engine.connect() as conn:
-        return pd.read_sql(sql, conn, params=params)
+    return pd.read_sql(sql, con=engine, params=params)
 
 # ---------- UI ----------
 mkt_df = get_marketplaces()
