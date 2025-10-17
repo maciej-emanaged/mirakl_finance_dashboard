@@ -16,8 +16,18 @@ if not DATABASE_URL:
     st.stop()
 
 # Auth: read users & cookie settings from secrets
-import copy
-CREDENTIALS = copy.deepcopy(st.secrets["credentials"])
+_creds = st.secrets.get("credentials", {})
+_users = _creds.get("usernames", {})
+
+# Make a normal Python dict copy so authenticator can modify it
+CREDENTIALS = {"usernames": {}}
+for uname, u in _users.items():
+    CREDENTIALS["usernames"][str(uname)] = {
+        "name": str(u.get("name", "")),
+        "email": str(u.get("email", "")),
+        "password": str(u.get("password", "")),
+    }
+
 AUTH = st.secrets.get("auth", {})
 COOKIE_NAME = AUTH.get("cookie_name", "mirakl_auth")
 COOKIE_KEY = AUTH.get("cookie_key", "change-this-key")
