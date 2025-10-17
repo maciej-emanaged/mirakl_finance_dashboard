@@ -51,8 +51,7 @@ username = st.session_state.get("username", None)
 name = st.session_state.get("name", username or "")
 
 if auth_status is True:
-    st.sidebar.write(f"Signed in as **{name}**")
-    authenticator.logout("Logout", location="sidebar")
+    pass
 elif auth_status is False:
     st.error("Incorrect username or password.")
     st.stop()
@@ -60,9 +59,12 @@ else:
     st.info("Please enter your username and password.")
     st.stop()
 
-# If we’re here → authenticated
-st.sidebar.write(f"Signed in as **{name}**")
-authenticator.logout("Logout", location="sidebar", key="logout-btn")
+# If we’re here → authenticated. Render sidebar user card only once.
+if not st.session_state.get("sidebar_rendered"):
+    with st.sidebar:
+        st.markdown(f"Signed in as **{name}**")
+        authenticator.logout("Logout", location="sidebar", key="logout-btn")
+    st.session_state["sidebar_rendered"] = True
 
 st.title("Mirakl Profitability — v1 (GMV, Refunds, Fees, Contribution)")
 
