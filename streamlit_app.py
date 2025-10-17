@@ -1,26 +1,56 @@
-# streamlit_app.py
+# streamlit_app.py (with login)
 import os
 import datetime as dt
 import pandas as pd
 import psycopg2
 import streamlit as st
+import streamlit_authenticator as stauth
 from dotenv import load_dotenv
 
 # ---------- Config & secrets ----------
-load_dotenv()  # allows local dev with .env
-# Prefer Streamlit Cloud secret, fallback to .env for local runs
+load_dotenv()  # local dev support
+
+# Read DB URL from Streamlit secrets first, else .env
 DATABASE_URL = st.secrets.get("DATABASE_URL", os.getenv("DATABASE_URL"))
+if not DATABASE_URL:
+    st.stop()
+
+# Auth: read users & cookie settings from secrets
+CREDENTIALS = {"usernames": dict(st.secrets.get("credentials", {}).get("usernames", {}))}
+AUTH = st.secrets.get("auth", {})
+COOKIE_NAME = AUTH.get("cookie_name", "mirakl_auth")
+COOKIE_KEY = AUTH.get("cookie_key", "change-this-key")
+COOKIE_EXPIRY = int(AUTH.get("cookie_expiry_days", 30))
 
 st.set_page_config(page_title="Mirakl Profitability v1", layout="wide")
-st.title("Mirakl Profitability — v1 (GMV, Refunds, Fees, Contribution)")
 
-if not DATABASE_URL:
-    st.stop()  # prevents rendering if secret not set
+# ---------- Auth ----------
+authenticator = stauth.Authenticate(
+    credentials=CREDENTIALS,
+    cookie_name=COOKIE_NAME,
+    key=COOKIE_KEY,
+    cookie_expiry_days=COOKIE_EXPIRY,
+)
+
+name, auth_status, username = authenticator.login("Login", "main")
+
+if auth_status is False:
+    st.error("Incorrect username or password.")
+    st.stop()
+elif auth_status is None:
+    st.info("Please enter your username and password.")
+    st.stop()
+
+# If we’re here → authenticated
+st.sidebar.write(f"Signed in as **{name}**")
+authenticator.logout("Logout", "sidebar")
+
+st.title("Mirakl Profitability — v1 (GMV, Refunds, Fees, Contribution)")
 
 # ---------- DB connection (cached, persistent) ----------
 @st.cache_resource
 def get_conn():
-    # Keep-alives help when running on Neon so idle SSL sessions aren't dropped
+    # Keep-alives help on Neon
     return psycopg2.connect(
         DATABASE_URL,
         keepalives=1,
