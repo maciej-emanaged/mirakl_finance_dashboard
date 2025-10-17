@@ -1,3 +1,4 @@
+# streamlit_app.py
 import os
 import datetime as dt
 import pandas as pd
@@ -5,37 +6,45 @@ import psycopg2
 import streamlit as st
 from dotenv import load_dotenv
 
-load_dotenv()
+# ---------- Config & secrets ----------
+load_dotenv()  # allows local dev with .env
+# Prefer Streamlit Cloud secret, fallback to .env for local runs
+DATABASE_URL = st.secrets.get("DATABASE_URL", os.getenv("DATABASE_URL"))
 
-# Prefer Streamlit Cloud secret if present, else .env (local)
-try:
-    import streamlit as st  # already imported later, safe to re-use
-    DATABASE_URL = st.secrets.get("DATABASE_URL", os.getenv("DATABASE_URL"))
-except Exception:
-    DATABASE_URL = os.getenv("DATABASE_URL")
+st.set_page_config(page_title="Mirakl Profitability v1", layout="wide")
+st.title("Mirakl Profitability — v1 (GMV, Refunds, Fees, Contribution)")
 
 if not DATABASE_URL:
-    st.stop()
+    st.stop()  # prevents rendering if secret not set
 
+# ---------- DB connection (cached, persistent) ----------
 @st.cache_resource
 def get_conn():
-    return psycopg2.connect(DATABASE_URL)
+    # Keep-alives help when running on Neon so idle SSL sessions aren't dropped
+    return psycopg2.connect(
+        DATABASE_URL,
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=5,
+    )
 
+# ---------- Cached queries ----------
 @st.cache_data(ttl=300)
 def get_marketplaces():
-    get_conn() as conn:
-        return pd.read_sql(
-            "select code as marketplace_code, name from mirakl.marketplaces order by code",
-            conn,
-        )
+    conn = get_conn()
+    return pd.read_sql(
+        "select code as marketplace_code, name from mirakl.marketplaces order by code",
+        conn,
+    )
 
 @st.cache_data(ttl=300)
 def get_date_bounds():
-    get_conn() as conn:
-        df = pd.read_sql(
-            "select min(created_at) as min_dt, max(created_at) as max_dt from mirakl.orders",
-            conn,
-        )
+    conn = get_conn()
+    df = pd.read_sql(
+        "select min(created_at) as min_dt, max(created_at) as max_dt from mirakl.orders",
+        conn,
+    )
     return (df.loc[0, "min_dt"], df.loc[0, "max_dt"])
 
 @st.cache_data(ttl=300)
@@ -93,8 +102,8 @@ def kpis(start_dt, end_dt, mkt_codes=None, sku_filter=None):
         "mkt": mkt_codes if mkt_codes else None,
         "sku": sku_filter if sku_filter else None,
     }
-    get_conn() as conn:
-        return pd.read_sql(sql, conn, params=params)
+    conn = get_conn()
+    return pd.read_sql(sql, conn, params=params)
 
 @st.cache_data(ttl=300)
 def top_skus(start_dt, end_dt, mkt_codes=None, sku_filter=None):
@@ -148,17 +157,16 @@ def top_skus(start_dt, end_dt, mkt_codes=None, sku_filter=None):
         "mkt": mkt_codes if mkt_codes else None,
         "sku": sku_filter if sku_filter else None,
     }
-    get_conn() as conn:
-        return pd.read_sql(sql, conn, params=params)
+    conn = get_conn()
+    return pd.read_sql(sql, conn, params=params)
 
-st.set_page_config(page_title="Mirakl Profitability v1", layout="wide")
-st.title("Mirakl Profitability — v1 (GMV, Refunds, Fees, Contribution)")
-
+# ---------- UI ----------
 mkt_df = get_marketplaces()
 left, right = st.columns([2, 3])
 
 with left:
     st.subheader("Filters")
+
     mkt_codes = mkt_df["marketplace_code"].tolist()
     selected = st.multiselect("Marketplace", mkt_codes, default=mkt_codes)
 
@@ -189,7 +197,7 @@ with right:
         c3.metric("Fees (sum)", f"£{summary['fees'].sum():,.2f}")
         c4.metric("Contribution (sum)", f"£{summary['contribution'].sum():,.2f}")
 
-        # Trend charts
+        # Trend of contribution by day/marketplace
         pivot_contrib = df.pivot_table(index="day", columns="marketplace_code", values="contribution", aggfunc="sum").fillna(0)
         st.line_chart(pivot_contrib)
 
