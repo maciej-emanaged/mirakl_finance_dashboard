@@ -6,6 +6,7 @@ import psycopg2
 import streamlit as st
 import streamlit_authenticator as stauth
 from dotenv import load_dotenv
+from sqlalchemy import create_engine
 
 # ---------- Config & secrets ----------
 load_dotenv()  # local dev support
@@ -68,34 +69,41 @@ if not st.session_state.get("sidebar_rendered"):
 
 st.title("Mirakl Profitability — v1 (GMV, Refunds, Fees, Contribution)")
 
-# ---------- DB connection (cached, persistent) ----------
+# ---------- DB engine (cached, resilient) ----------
 @st.cache_resource
-def get_conn():
-    # Keep-alives help on Neon
-    return psycopg2.connect(
-        DATABASE_URL,
-        keepalives=1,
-        keepalives_idle=30,
-        keepalives_interval=10,
-        keepalives_count=5,
+def get_engine():
+    # Clean up the URL in case secrets had extra quotes/newlines
+    url = DATABASE_URL.strip().strip("'").strip('"').replace("\n", "")
+    return create_engine(
+        url,
+        pool_pre_ping=True,       # auto-checks connection health
+        pool_recycle=900,         # recycle every 15 min (Neon safe)
+        connect_args={
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 5,
+        },
     )
 
 # ---------- Cached queries ----------
 @st.cache_data(ttl=300)
 def get_marketplaces():
-    conn = get_conn()
-    return pd.read_sql(
-        "select code as marketplace_code, name from mirakl.marketplaces order by code",
-        conn,
-    )
+    engine = get_engine()
+    with engine.connect() as conn:
+        return pd.read_sql(
+            "select code as marketplace_code, name from mirakl.marketplaces order by code",
+            conn,
+        )
 
 @st.cache_data(ttl=300)
 def get_date_bounds():
-    conn = get_conn()
-    df = pd.read_sql(
-        "select min(created_at) as min_dt, max(created_at) as max_dt from mirakl.orders",
-        conn,
-    )
+    engine = get_engine()
+    with engine.connect() as conn:
+        df = pd.read_sql(
+            "select min(created_at) as min_dt, max(created_at) as max_dt from mirakl.orders",
+            conn,
+        )
     return (df.loc[0, "min_dt"], df.loc[0, "max_dt"])
 
 @st.cache_data(ttl=300)
@@ -153,8 +161,9 @@ def kpis(start_dt, end_dt, mkt_codes=None, sku_filter=None):
         "mkt": mkt_codes if mkt_codes else None,
         "sku": sku_filter if sku_filter else None,
     }
-    conn = get_conn()
-    return pd.read_sql(sql, conn, params=params)
+    engine = get_engine()
+    with engine.connect() as conn:
+        return pd.read_sql(sql, conn, params=params)
 
 @st.cache_data(ttl=300)
 def top_skus(start_dt, end_dt, mkt_codes=None, sku_filter=None):
@@ -183,6 +192,7 @@ def top_skus(start_dt, end_dt, mkt_codes=None, sku_filter=None):
     joined as (
       select
         l.marketplace_code, l.sku,
+        l.qty::numeric as qty,
         (l.qty * (l.price_ex + l.tax))::numeric as line_gmv,
         coalesce(r.refund_amount,0)::numeric as refunds,
         l.fees::numeric as fees
@@ -193,14 +203,14 @@ def top_skus(start_dt, end_dt, mkt_codes=None, sku_filter=None):
         and (%(mkt)s is null OR l.marketplace_code = any(%(mkt)s))
     )
     select marketplace_code, sku,
+           sum(qty) as units,
            sum(line_gmv) as gmv,
            sum(refunds)  as refunds,
            sum(fees)     as fees,
            sum(line_gmv) - sum(refunds) - sum(fees) as contribution
     from joined
     group by marketplace_code, sku
-    order by contribution desc
-    limit 25;
+    order by contribution desc;
     """
     params = {
         "start": start_dt,
@@ -208,8 +218,9 @@ def top_skus(start_dt, end_dt, mkt_codes=None, sku_filter=None):
         "mkt": mkt_codes if mkt_codes else None,
         "sku": sku_filter if sku_filter else None,
     }
-    conn = get_conn()
-    return pd.read_sql(sql, conn, params=params)
+    engine = get_engine()
+    with engine.connect() as conn:
+        return pd.read_sql(sql, conn, params=params)
 
 # ---------- UI ----------
 mkt_df = get_marketplaces()
@@ -252,6 +263,6 @@ with right:
         pivot_contrib = df.pivot_table(index="day", columns="marketplace_code", values="contribution", aggfunc="sum").fillna(0)
         st.line_chart(pivot_contrib)
 
-st.subheader("Top SKUs by Contribution (limit 25)")
+st.subheader("SKU Performance by Contribution")
 sku_df = top_skus(start_date, end_date, selected, sku_filter)
 st.dataframe(sku_df, width="stretch")
