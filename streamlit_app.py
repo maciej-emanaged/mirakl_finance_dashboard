@@ -23,7 +23,7 @@ def get_conn():
 
 @st.cache_data(ttl=300)
 def get_marketplaces():
-    with get_conn() as conn:
+    get_conn() as conn:
         return pd.read_sql(
             "select code as marketplace_code, name from mirakl.marketplaces order by code",
             conn,
@@ -31,7 +31,7 @@ def get_marketplaces():
 
 @st.cache_data(ttl=300)
 def get_date_bounds():
-    with get_conn() as conn:
+    get_conn() as conn:
         df = pd.read_sql(
             "select min(created_at) as min_dt, max(created_at) as max_dt from mirakl.orders",
             conn,
@@ -93,7 +93,7 @@ def kpis(start_dt, end_dt, mkt_codes=None, sku_filter=None):
         "mkt": mkt_codes if mkt_codes else None,
         "sku": sku_filter if sku_filter else None,
     }
-    with get_conn() as conn:
+    get_conn() as conn:
         return pd.read_sql(sql, conn, params=params)
 
 @st.cache_data(ttl=300)
@@ -148,7 +148,7 @@ def top_skus(start_dt, end_dt, mkt_codes=None, sku_filter=None):
         "mkt": mkt_codes if mkt_codes else None,
         "sku": sku_filter if sku_filter else None,
     }
-    with get_conn() as conn:
+    get_conn() as conn:
         return pd.read_sql(sql, conn, params=params)
 
 st.set_page_config(page_title="Mirakl Profitability v1", layout="wide")
