@@ -433,36 +433,12 @@ if show_orders:
     with right_i:
         st.write(f"Page {st.session_state.order_page} of {max_page} • {total_rows} rows total")
 
-# Use data_editor (read-only) so LinkColumn links are clickable across versions
-from packaging import version as _v
-_linkable_order = _v.parse(st.__version__) >= _v.parse("1.36.0")
-
-if _linkable_order:
+    # Render (version-agnostic): dedicated "Open" link column
     st.data_editor(
         orders_df,
         use_container_width=True,
         height=520,
-        disabled=True,  # read-only
-        column_config={
-            "Order #": st.column_config.LinkColumn(
-            "Order #",
-            help="Open in Mirakl",
-            url="Order URL",   # ✅ correct
-        ),
-
-            # Keep the raw URL hidden/compact
-            "Order URL": st.column_config.TextColumn("Order URL", max_chars=6),
-            # Hide the fallback column in this path
-            "Open": None,
-        },
-    )
-else:
-    # Older Streamlit fallback: an explicit Open link column
-    st.data_editor(
-        orders_df,
-        use_container_width=True,
-        height=520,
-        disabled=True,
+        disabled=True,  # read-only table
         column_config={
             "Open": st.column_config.LinkColumn(
                 "Open",
@@ -471,6 +447,7 @@ else:
                 max_chars=60,
             ),
             "Order #": st.column_config.TextColumn("Order #"),
+            # keep URL column compact (useful if you later upgrade and bind to Order #)
             "Order URL": st.column_config.TextColumn("Order URL", max_chars=6),
         },
     )
