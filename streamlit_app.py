@@ -105,23 +105,26 @@ def get_date_bounds():
 @st.cache_data(ttl=300)
 def kpis(start_dt, end_dt, mkt_codes=None, sku_filter=None):
     sql = """
-with lines as (
-  select
-    o.marketplace_code,
-    o.created_at::date as day,
-    ol.sku,
-    ol.qty::numeric as qty,
-    coalesce(ol.price_tax_excl,0)::numeric as price_ex,
-    coalesce(ol.tax_amount,0)::numeric  as tax,
-    coalesce(ol.price_tax_incl, null)::numeric as price_incl,
-    coalesce(ol.shipping_price,0)::numeric as ship_price,
-    coalesce(ol.fees_total,0)::numeric as fees_total,
-    ol.order_id, ol.line_id
-  from mirakl.orders o
-  join mirakl.order_lines ol
-    on ol.order_id = o.order_id and ol.marketplace_code = o.marketplace_code
-  where o.created_at >= %(start)s and o.created_at < %(end)s
-),    refunds as (
+    with lines as (
+      select
+        o.marketplace_code,
+        o.created_at::date as day,
+        ol.sku,
+        ol.qty::numeric as qty,
+        coalesce(ol.price_tax_excl,0)::numeric as price_ex,
+        coalesce(ol.tax_amount,0)::numeric  as tax,
+        coalesce(ol.price_tax_incl, null)::numeric as price_incl,
+        coalesce(ol.shipping_price,0)::numeric as ship_price,
+        coalesce(ol.fees_total,0)::numeric as fees_total,
+        ol.order_id, ol.line_id
+      from mirakl.orders o
+      join mirakl.order_lines ol
+        on ol.order_id = o.order_id and ol.marketplace_code = o.marketplace_code
+      where o.created_at >= %(start)s
+        and o.created_at < %(end)s
+        and (%(mkt)s is null or o.marketplace_code = any(%(mkt)s::text[]))
+    ),
+    refunds as (
       select order_id, line_id, marketplace_code,
              sum(coalesce(amount_tax_excl,0) + coalesce(tax_amount,0))::numeric as refund_amount
       from mirakl.refunds
@@ -138,7 +141,6 @@ with lines as (
       left join refunds r
         on r.order_id = l.order_id and r.line_id = l.line_id and r.marketplace_code = l.marketplace_code
       where (%(sku)s is null OR l.sku = %(sku)s)
-        and (%(mkt)s is null OR l.marketplace_code = any(%(mkt)s))
     )
     select
       marketplace_code,
@@ -169,14 +171,16 @@ def top_skus(start_dt, end_dt, mkt_codes=None, sku_filter=None):
         ol.sku,
         ol.qty::numeric as qty,
         coalesce(ol.price_tax_excl,0)::numeric as price_ex,
-	coalesce(ol.price_tax_incl, null)::numeric as price_incl,
+        coalesce(ol.price_tax_incl, null)::numeric as price_incl,
         coalesce(ol.tax_amount,0)::numeric as tax,
         coalesce(ol.fees_total,0)::numeric as fees,
         ol.order_id, ol.line_id
       from mirakl.orders o
       join mirakl.order_lines ol
         on ol.order_id = o.order_id and ol.marketplace_code = o.marketplace_code
-      where o.created_at >= %(start)s and o.created_at < %(end)s
+      where o.created_at >= %(start)s
+        and o.created_at < %(end)s
+        and (%(mkt)s is null or o.marketplace_code = any(%(mkt)s::text[]))
     ),
     refunds as (
       select order_id, line_id, marketplace_code,
@@ -189,14 +193,13 @@ def top_skus(start_dt, end_dt, mkt_codes=None, sku_filter=None):
       select
         l.marketplace_code, l.sku,
         l.qty::numeric as qty,
-(l.qty * coalesce(l.price_incl, l.price_ex + l.tax))::numeric as line_gmv,
-coalesce(r.refund_amount,0)::numeric as refunds,
-l.fees::numeric as fees
+        (l.qty * coalesce(l.price_incl, l.price_ex + l.tax))::numeric as line_gmv,
+        coalesce(r.refund_amount,0)::numeric as refunds,
+        l.fees::numeric as fees
       from lines l
       left join refunds r
         on r.order_id = l.order_id and r.line_id = l.line_id and r.marketplace_code = l.marketplace_code
       where (%(sku)s is null OR l.sku = %(sku)s)
-        and (%(mkt)s is null OR l.marketplace_code = any(%(mkt)s))
     )
     select marketplace_code, sku,
            sum(qty) as units,
@@ -250,7 +253,7 @@ def order_lines_table(start_date, end_date, sku=None, marketplaces=None, page=1,
       where o.created_at >= %(start)s
         and o.created_at < %(end)s
         and (%(sku)s is null or ol.sku = %(sku)s)
-        and (%(mkt)s is null or o.marketplace_code = any(%(mkt)s))
+        and (%(mkt)s is null or o.marketplace_code = any(%(mkt)s::text[]))
     ),
     refunds as (
       select
