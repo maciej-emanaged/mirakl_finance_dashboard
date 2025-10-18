@@ -131,7 +131,7 @@ def kpis(start_dt, end_dt, mkt_codes=None, sku_filter=None):
     joined as (
       select
         l.marketplace_code, l.day, l.sku,
-        (l.qty * (l.price_ex + l.tax))::numeric as line_gmv,
+        (l.qty * coalesce(l.price_incl, l.price_ex + l.tax))::numeric as line_gmv,
         coalesce(r.refund_amount,0)::numeric as refunds,
         l.fees_total::numeric as fees
       from lines l
@@ -169,6 +169,7 @@ def top_skus(start_dt, end_dt, mkt_codes=None, sku_filter=None):
         ol.sku,
         ol.qty::numeric as qty,
         coalesce(ol.price_tax_excl,0)::numeric as price_ex,
+	coalesce(ol.price_tax_incl, null)::numeric as price_incl,
         coalesce(ol.tax_amount,0)::numeric as tax,
         coalesce(ol.fees_total,0)::numeric as fees,
         ol.order_id, ol.line_id
@@ -216,6 +217,100 @@ def top_skus(start_dt, end_dt, mkt_codes=None, sku_filter=None):
     engine = get_engine()
     return pd.read_sql(sql, con=engine, params=params)
 
+def order_lines_table(start_date, end_date, sku=None, marketplaces=None, page=1, page_size=100):
+    """
+    Returns a paginated order-line table and the total row count.
+    Includes Order # (order_id), SKU, qty, unit gross (incl VAT), line GMV, refunds, fees, day, marketplace.
+    """
+    # compute bounds
+    start = start_date
+    end = end_date + dt.timedelta(days=1)  # make end exclusive
+
+    # calculate offset from page
+    page = max(1, int(page))
+    limit = int(page_size)
+    offset = (page - 1) * limit
+
+    sql = """
+    with lines as (
+      select
+        o.created_at::date as day,
+        o.marketplace_code,
+        ol.order_id,
+        ol.line_id,
+        ol.sku,
+        ol.qty,
+        coalesce(ol.price_tax_incl, ol.price_tax_excl + ol.tax_amount)::numeric as unit_gross,
+        (ol.qty * coalesce(ol.price_tax_incl, ol.price_tax_excl + ol.tax_amount))::numeric as line_gmv,
+        coalesce(ol.fees_total, 0)::numeric as fees
+      from mirakl.orders o
+      join mirakl.order_lines ol
+        on ol.order_id = o.order_id
+       and ol.marketplace_code = o.marketplace_code
+      where o.created_at >= %(start)s
+        and o.created_at < %(end)s
+        and (%(sku)s is null or ol.sku = %(sku)s)
+        and (%(mkt)s is null or o.marketplace_code = any(%(mkt)s))
+    ),
+    refunds as (
+      select
+        r.order_id, r.marketplace_code, r.line_id,
+        sum(coalesce(r.amount_tax_excl,0) + coalesce(r.tax_amount,0))::numeric as refund_amount
+      from mirakl.refunds r
+      where r.created_at >= %(start)s
+        and r.created_at < %(end)s
+      group by 1,2,3
+    ),
+    joined as (
+      select
+        l.day, l.marketplace_code, l.order_id, l.line_id, l.sku, l.qty,
+        l.unit_gross,
+        l.line_gmv,
+        coalesce(r.refund_amount, 0)::numeric as refunds,
+        l.fees
+      from lines l
+      left join refunds r
+        on r.order_id = l.order_id
+       and r.marketplace_code = l.marketplace_code
+       and r.line_id = l.line_id
+    )
+    select
+      *,
+      count(*) over() as total_count
+    from joined
+    order by day desc, order_id desc, line_id desc
+    offset %(offset)s limit %(limit)s;
+    """
+
+    engine = get_engine()
+    params = {
+        "start": start,
+        "end": end,
+        "sku": sku,
+        "mkt": marketplaces if marketplaces else None,
+        "offset": offset,
+        "limit": limit,
+    }
+    df = pd.read_sql(sql, con=engine, params=params)
+
+    total = int(df["total_count"].iloc[0]) if not df.empty else 0
+    # make visible column names friendly
+    if not df.empty:
+        df = df.drop(columns=["total_count"])
+        df = df.rename(columns={
+            "marketplace_code": "Marketplace",
+            "day": "Day",
+            "order_id": "Order #",
+            "sku": "SKU",
+            "qty": "Qty",
+            "unit_gross": "Unit (inc VAT)",
+            "line_gmv": "Line GMV",
+            "refunds": "Refunds",
+            "fees": "Fees"
+        })
+    return df, total
+
+
 # ---------- UI ----------
 mkt_df = get_marketplaces()
 left, right = st.columns([2, 3])
@@ -258,5 +353,56 @@ with right:
         st.line_chart(pivot_contrib)
 
 st.subheader("SKU Performance by Contribution")
+# ---- Order-level toggle + pagination ----
+show_orders = st.checkbox("Show order-level rows (with Order #)", value=False)
+
+if show_orders:
+    # Pagination state
+    if "order_page" not in st.session_state:
+        st.session_state.order_page = 1
+
+    col_a, col_b, col_c, col_d = st.columns([1,1,4,4])
+    with col_a:
+        if st.button("◀ Prev", use_container_width=True):
+            st.session_state.order_page = max(1, st.session_state.order_page - 1)
+    with col_b:
+        if st.button("Next ▶", use_container_width=True):
+            st.session_state.order_page = st.session_state.order_page + 1
+
+    PAGE_SIZE = 100
+    orders_df, total_rows = order_lines_table(
+        start_date=start_date,
+        end_date=end_date,
+        sku=sku if sku else None,
+        marketplaces=marketplaces if marketplaces else None,
+        page=st.session_state.order_page,
+        page_size=PAGE_SIZE
+    )
+
+    # clamp page if user clicks next beyond last
+    max_page = max(1, int((total_rows + PAGE_SIZE - 1) // PAGE_SIZE))
+    if st.session_state.order_page > max_page:
+        st.session_state.order_page = max_page
+        # re-fetch with clamped page
+        orders_df, total_rows = order_lines_table(
+            start_date=start_date,
+            end_date=end_date,
+            sku=sku if sku else None,
+            marketplaces=marketplaces if marketplaces else None,
+            page=st.session_state.order_page,
+            page_size=PAGE_SIZE
+        )
+
+    # header + info
+    left_i, right_i = st.columns([3, 2])
+    with left_i:
+        st.subheader("Order lines")
+    with right_i:
+        st.write(f"Page {st.session_state.order_page} of {max_page} • {total_rows} rows total")
+
+    st.dataframe(orders_df, use_container_width=True, height=520)
+
+    # stop here so the SKU table below doesn't also render
+    st.stop()
 sku_df = top_skus(start_date, end_date, selected, sku_filter)
 st.dataframe(sku_df, width="stretch")
