@@ -8,6 +8,20 @@ import streamlit_authenticator as stauth
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 
+# ---------- Mirakl order landing URLs per marketplace ----------
+ORDER_PORTALS = {
+    "BNQ": "https://marketplace.kingfisher.com",
+    "TES": "https://tescouk-prod.mirakl.net",
+    "DEB": "https://debenhams.mirakl.net",  # change if different
+    # add more as needed...
+}
+
+def build_order_url(marketplace_code: str, order_id: str) -> str | None:
+    base = ORDER_PORTALS.get(str(marketplace_code).upper())
+    if not base or not order_id:
+        return None
+    return f"{base}/mmp/shop/order/{order_id}"
+
 # ---------- Config & secrets ----------
 load_dotenv()  # local dev support
 
@@ -317,6 +331,15 @@ def order_lines_table(start_date, end_date, sku=None, marketplaces=None, page=1,
             "refunds": "Refunds",
             "fees": "Fees"
         })
+
+        # Build URL column (kept separate so "Order #" can stay as display text)
+        df["Order URL"] = df.apply(
+            lambda r: build_order_url(r.get("Marketplace"), r.get("Order #")),
+            axis=1,
+        )
+
+        # Fallback "Open" column (used on older Streamlit that can't bind link to a different column)
+        df["Open"] = df["Order URL"]
     return df, total
 
 
@@ -410,7 +433,47 @@ if show_orders:
     with right_i:
         st.write(f"Page {st.session_state.order_page} of {max_page} • {total_rows} rows total")
 
-    st.dataframe(orders_df, use_container_width=True, height=520)
+    # Make "Order #" clickable when Streamlit supports LinkColumn(link="...") (>=1.36).
+    from packaging import version as _v
+    _linkable_order = _v.parse(st.__version__) >= _v.parse("1.36.0")
+
+    if _linkable_order:
+        st.dataframe(
+            orders_df,
+            use_container_width=True,
+            height=520,
+            column_config={
+                "Order #": st.column_config.LinkColumn(
+                    "Order #",
+                    help="Open in Mirakl",
+                    # use URL from a different column while showing order id as text
+                    link="Order URL",
+                ),
+                # Hide the raw URL column from view (by shortening & pushing to the end)
+                "Order URL": st.column_config.TextColumn("Order URL", max_chars=8),
+                # Optional: also keep a compact "Open" link if you like
+                "Open": None,
+            },
+        )
+    else:
+        # Fallback for older Streamlit: show an explicit "Open" link column
+        st.dataframe(
+            orders_df,
+            use_container_width=True,
+            height=520,
+            column_config={
+                "Open": st.column_config.LinkColumn(
+                    "Open",
+                    help="Open in Mirakl",
+                    validate="^https?://.*",
+                    max_chars=80,
+                ),
+                # Keep Order # as plain text (not clickable)
+                "Order #": st.column_config.TextColumn("Order #"),
+                # Optionally hide the raw URL column by truncating visually
+                "Order URL": st.column_config.TextColumn("Order URL", max_chars=8),
+            },
+        )
 
     # Stop here so SKU table below doesn’t also render
     st.stop()
