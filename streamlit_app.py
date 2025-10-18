@@ -12,7 +12,7 @@ from sqlalchemy import create_engine
 ORDER_PORTALS = {
     "BNQ": "https://marketplace.kingfisher.com",
     "TES": "https://tescouk-prod.mirakl.net",
-    "DEB": "https://debenhams.mirakl.net",  # change if different
+    "DEB": "https://debenhamsuk-prod.mirakl.net/",
     # add more as needed...
 }
 
@@ -80,6 +80,11 @@ with st.sidebar:
     authenticator.logout("Logout", location="sidebar", key="logout-btn")
 
 st.title("Mirakl Profitability — v1 (GMV, Refunds, Fees, Contribution)")
+
+# Add just below st.title(...)
+if st.button("🔄 Refresh data"):
+    st.cache_data.clear()
+    st.rerun()
 
 # ---------- DB engine (cached, resilient) ----------
 @st.cache_resource
