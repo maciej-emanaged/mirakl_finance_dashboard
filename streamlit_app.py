@@ -433,28 +433,28 @@ if show_orders:
     with right_i:
         st.write(f"Page {st.session_state.order_page} of {max_page} • {total_rows} rows total")
 
-# Render: dedicated "Open" link column; hide raw URL and control order
-st.data_editor(
-    orders_df,
-    use_container_width=True,
-    height=520,
-    disabled=True,  # read-only table
-    column_order=[
-        "Day", "Marketplace", "Order #", "line_id", "SKU", "Qty",
-        "Unit (inc VAT)", "Line GMV", "Refunds", "Fees", "Open"
-    ],
-    column_config={
-        "Open": st.column_config.LinkColumn(
-            "Open",
-            help="Open in Mirakl",
-            validate="^https?://.*",
-            max_chars=60,
-        ),
-        "Order #": st.column_config.TextColumn("Order #"),
-        # hide the raw URL column entirely
-        "Order URL": None,
-    },
-)
+    # Render: dedicated "Open" link column; hide raw URL and control order
+    st.data_editor(
+        orders_df,
+        use_container_width=True,
+        height=520,
+        disabled=True,  # read-only table
+        column_order=[
+            "Day", "Marketplace", "Order #", "line_id", "SKU", "Qty",
+            "Unit (inc VAT)", "Line GMV", "Refunds", "Fees", "Open"
+        ],
+        column_config={
+            "Open": st.column_config.LinkColumn(
+                "Open",
+                help="Open in Mirakl",
+                validate="^https?://.*",
+                max_chars=60,
+            ),
+            "Order #": st.column_config.TextColumn("Order #"),
+            # hide the raw URL column entirely
+            "Order URL": None,
+        },
+    )
 
     # Stop here so SKU table below doesn’t also render
     st.stop()
