@@ -105,23 +105,23 @@ def get_date_bounds():
 @st.cache_data(ttl=300)
 def kpis(start_dt, end_dt, mkt_codes=None, sku_filter=None):
     sql = """
-    with lines as (
-      select
-        o.marketplace_code,
-        o.created_at::date as day,
-        ol.sku,
-        ol.qty::numeric as qty,
-        coalesce(ol.price_tax_excl,0)::numeric as price_ex,
-        coalesce(ol.tax_amount,0)::numeric  as tax,
-        coalesce(ol.shipping_price,0)::numeric as ship_price,
-        coalesce(ol.fees_total,0)::numeric as fees_total,
-        ol.order_id, ol.line_id
-      from mirakl.orders o
-      join mirakl.order_lines ol
-        on ol.order_id = o.order_id and ol.marketplace_code = o.marketplace_code
-      where o.created_at >= %(start)s and o.created_at < %(end)s
-    ),
-    refunds as (
+with lines as (
+  select
+    o.marketplace_code,
+    o.created_at::date as day,
+    ol.sku,
+    ol.qty::numeric as qty,
+    coalesce(ol.price_tax_excl,0)::numeric as price_ex,
+    coalesce(ol.tax_amount,0)::numeric  as tax,
+    coalesce(ol.price_tax_incl, null)::numeric as price_incl,
+    coalesce(ol.shipping_price,0)::numeric as ship_price,
+    coalesce(ol.fees_total,0)::numeric as fees_total,
+    ol.order_id, ol.line_id
+  from mirakl.orders o
+  join mirakl.order_lines ol
+    on ol.order_id = o.order_id and ol.marketplace_code = o.marketplace_code
+  where o.created_at >= %(start)s and o.created_at < %(end)s
+),    refunds as (
       select order_id, line_id, marketplace_code,
              sum(coalesce(amount_tax_excl,0) + coalesce(tax_amount,0))::numeric as refund_amount
       from mirakl.refunds
@@ -189,9 +189,9 @@ def top_skus(start_dt, end_dt, mkt_codes=None, sku_filter=None):
       select
         l.marketplace_code, l.sku,
         l.qty::numeric as qty,
-        (l.qty * (l.price_ex + l.tax))::numeric as line_gmv,
-        coalesce(r.refund_amount,0)::numeric as refunds,
-        l.fees::numeric as fees
+(l.qty * coalesce(l.price_incl, l.price_ex + l.tax))::numeric as line_gmv,
+coalesce(r.refund_amount,0)::numeric as refunds,
+l.fees::numeric as fees
       from lines l
       left join refunds r
         on r.order_id = l.order_id and r.line_id = l.line_id and r.marketplace_code = l.marketplace_code
@@ -361,7 +361,7 @@ if show_orders:
     if "order_page" not in st.session_state:
         st.session_state.order_page = 1
 
-    col_a, col_b, col_c, col_d = st.columns([1,1,4,4])
+    col_a, col_b, col_c, col_d = st.columns([1, 1, 4, 4])
     with col_a:
         if st.button("◀ Prev", use_container_width=True):
             st.session_state.order_page = max(1, st.session_state.order_page - 1)
@@ -370,30 +370,31 @@ if show_orders:
             st.session_state.order_page = st.session_state.order_page + 1
 
     PAGE_SIZE = 100
+
     orders_df, total_rows = order_lines_table(
         start_date=start_date,
         end_date=end_date,
-        sku=sku if sku else None,
-        marketplaces=marketplaces if marketplaces else None,
+        sku=sku_filter if sku_filter else None,
+        marketplaces=selected if selected else None,
         page=st.session_state.order_page,
-        page_size=PAGE_SIZE
+        page_size=PAGE_SIZE,
     )
 
-    # clamp page if user clicks next beyond last
+    # Clamp page if user clicks next beyond last
     max_page = max(1, int((total_rows + PAGE_SIZE - 1) // PAGE_SIZE))
     if st.session_state.order_page > max_page:
         st.session_state.order_page = max_page
-        # re-fetch with clamped page
+        # Re-fetch with clamped page
         orders_df, total_rows = order_lines_table(
             start_date=start_date,
             end_date=end_date,
-            sku=sku if sku else None,
-            marketplaces=marketplaces if marketplaces else None,
+            sku=sku_filter if sku_filter else None,
+            marketplaces=selected if selected else None,
             page=st.session_state.order_page,
-            page_size=PAGE_SIZE
+            page_size=PAGE_SIZE,
         )
 
-    # header + info
+    # Header + info
     left_i, right_i = st.columns([3, 2])
     with left_i:
         st.subheader("Order lines")
@@ -402,7 +403,8 @@ if show_orders:
 
     st.dataframe(orders_df, use_container_width=True, height=520)
 
-    # stop here so the SKU table below doesn't also render
+    # Stop here so SKU table below doesn’t also render
     st.stop()
+
 sku_df = top_skus(start_date, end_date, selected, sku_filter)
 st.dataframe(sku_df, width="stretch")
