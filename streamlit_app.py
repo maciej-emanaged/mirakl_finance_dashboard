@@ -112,8 +112,8 @@ def kpis(start_dt, end_dt, mkt_codes=None, sku_filter=None):
         ol.sku,
         ol.qty::numeric as qty,
         coalesce(ol.price_tax_excl,0)::numeric as price_ex,
+        coalesce(ol.price_tax_incl, ol.price_tax_excl + ol.tax_amount)::numeric as price_incl,
         coalesce(ol.tax_amount,0)::numeric  as tax,
-        coalesce(ol.price_tax_incl, null)::numeric as price_incl,
         coalesce(ol.shipping_price,0)::numeric as ship_price,
         coalesce(ol.fees_total,0)::numeric as fees_total,
         ol.order_id, ol.line_id
@@ -125,22 +125,28 @@ def kpis(start_dt, end_dt, mkt_codes=None, sku_filter=None):
         and (%(mkt)s is null or o.marketplace_code = any(%(mkt)s::text[]))
     ),
     refunds as (
-      select order_id, line_id, marketplace_code,
-             sum(coalesce(amount_tax_excl,0) + coalesce(tax_amount,0))::numeric as refund_amount
+      select
+        order_id, line_id, marketplace_code,
+        sum(coalesce(amount_tax_excl,0) + coalesce(tax_amount,0))::numeric as refund_amount
       from mirakl.refunds
-      where created_at >= %(start)s and created_at < %(end)s
+      where created_at >= %(start)s
+        and created_at < %(end)s
       group by order_id, line_id, marketplace_code
     ),
     joined as (
       select
-        l.marketplace_code, l.day, l.sku,
+        l.marketplace_code,
+        l.day,
+        l.sku,
         (l.qty * coalesce(l.price_incl, l.price_ex + l.tax))::numeric as line_gmv,
         coalesce(r.refund_amount,0)::numeric as refunds,
         l.fees_total::numeric as fees
       from lines l
       left join refunds r
-        on r.order_id = l.order_id and r.line_id = l.line_id and r.marketplace_code = l.marketplace_code
-      where (%(sku)s is null OR l.sku = %(sku)s)
+        on r.order_id = l.order_id
+       and r.line_id = l.line_id
+       and r.marketplace_code = l.marketplace_code
+      where (%(sku)s is null or l.sku = %(sku)s)
     )
     select
       marketplace_code,
