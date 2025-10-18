@@ -445,10 +445,11 @@ if _linkable_order:
         disabled=True,  # read-only
         column_config={
             "Order #": st.column_config.LinkColumn(
-                "Order #",
-                help="Open in Mirakl",
-                link="Order URL",  # display Order #, click goes to URL
-            ),
+            "Order #",
+            help="Open in Mirakl",
+            url="Order URL",   # ✅ correct
+        ),
+
             # Keep the raw URL hidden/compact
             "Order URL": st.column_config.TextColumn("Order URL", max_chars=6),
             # Hide the fallback column in this path
